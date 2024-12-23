@@ -19,12 +19,27 @@ class DreamRunner {
         this.runCycle = 0;
         
         // Camera properties
-        this.cameraDistance = 60; // Doubled to match world scale
-        this.cameraHeight = 50;   // Doubled to match world scale
+        this.defaultCameraDistance = 60; // Doubled to match world scale
+        this.defaultCameraHeight = 50;   // Doubled to match world scale
+        this.cameraDistance = this.defaultCameraDistance;
+        this.cameraHeight = this.defaultCameraHeight;
+        this.minZoom = 5;  // First person view
+        this.maxZoom = 120; // Far view
 
         // Initialize keyboard controls
         this.keys = {};
-        window.addEventListener('keydown', (e) => this.keys[e.code] = true);
+        window.addEventListener('keydown', (e) => {
+            this.keys[e.code] = true;
+            
+            // Handle zoom controls
+            if (e.code === 'Equal') { // Plus/equals key
+                this.zoomCamera(-10); // Zoom in
+            } else if (e.code === 'Minus') { // Minus/underscore key
+                this.zoomCamera(10);  // Zoom out
+            } else if (e.code === 'KeyR') { // R key
+                this.resetZoom();
+            }
+        });
         window.addEventListener('keyup', (e) => this.keys[e.code] = false);
 
         // Lighting
@@ -155,17 +170,40 @@ class DreamRunner {
         // Load texture after creating the sphere
         const textureLoader = new THREE.TextureLoader();
         
-        // Use NASA's Blue Marble texture for more accurate geography
+        // Use NASA's Blue Marble texture with contrast enhancement
         textureLoader.load(
             'https://eoimages.gsfc.nasa.gov/images/imagerecords/74000/74393/world.200409.3x5400x2700.jpg',
             (texture) => {
-                material.map = texture;
+                // Create a canvas to modify the texture
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = texture.image.width;
+                canvas.height = texture.image.height;
+                
+                // Draw and enhance the image
+                ctx.drawImage(texture.image, 0, 0);
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageData.data;
+                
+                // Enhance contrast and saturation
+                for (let i = 0; i < data.length; i += 4) {
+                    // Increase contrast
+                    data[i] = Math.min(255, data[i] * 1.2);     // Red
+                    data[i + 1] = Math.min(255, data[i + 1] * 1.3); // Green (extra boost)
+                    data[i + 2] = Math.min(255, data[i + 2] * 1.1); // Blue
+                }
+                
+                ctx.putImageData(imageData, 0, 0);
+                
+                // Create new texture from canvas
+                const enhancedTexture = new THREE.Texture(canvas);
+                enhancedTexture.needsUpdate = true;
+                material.map = enhancedTexture;
                 material.needsUpdate = true;
             },
             undefined,
             (error) => {
                 console.error('Error loading NASA texture, falling back to alternate source');
-                // Fallback to alternate source if NASA image fails
                 textureLoader.load(
                     'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg',
                     (texture) => {
@@ -289,6 +327,28 @@ class DreamRunner {
         
         this.camera.lookAt(this.position);
         this.camera.up.copy(up);
+    }
+
+    zoomCamera(delta) {
+        const newDistance = this.cameraDistance + delta;
+        const newHeight = this.cameraHeight + (delta * 0.8); // Height changes slightly slower
+        
+        // Check zoom bounds
+        if (newDistance >= this.minZoom && newDistance <= this.maxZoom) {
+            this.cameraDistance = newDistance;
+            this.cameraHeight = newHeight;
+            
+            // Handle first-person view transition
+            if (this.cameraDistance <= 10) {
+                // Gradually lower height as we get closer to first person
+                this.cameraHeight = Math.max(3, newHeight); // Keep slightly above head level
+            }
+        }
+    }
+
+    resetZoom() {
+        this.cameraDistance = this.defaultCameraDistance;
+        this.cameraHeight = this.defaultCameraHeight;
     }
 
     onWindowResize() {
